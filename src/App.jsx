@@ -451,9 +451,135 @@ export default function App() {
           </div>
         )}
 
-        {/* Lista de compra */}
+        {/* Modal mover carpeta */}
+        {movingNode && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
+              <h3 className="text-lg font-bold mb-4">Mover "{movingNode.name}"</h3>
+              
+              <div className="space-y-2 mb-4">
+                <button
+                  onClick={() => setMoveTarget(null)}
+                  className={`w-full p-3 rounded-lg text-left ${
+                    moveTarget === null ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
+                  }`}
+                >
+                  📂 Raíz de {currentFunction.name}
+                </button>
+                
+                {availableTargets.map(target => (
+                  <button
+                    key={target.id}
+                    onClick={() => setMoveTarget(target.id)}
+                    className={`w-full p-3 rounded-lg text-left ${
+                      moveTarget === target.id ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    📁 {target.name}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex gap-2">
+                <button 
+                  onClick={moveNode}
+                  className="flex-1 p-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg"
+                >
+                  Mover aquí
+                </button>
+                <button 
+                  onClick={() => { setMovingNode(null); setMoveTarget(null); }}
+                  className="px-4 bg-gray-700 hover:bg-gray-600 rounded-lg"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Carpetas y tareas */}
+        <div className="space-y-3">
+          {folders.map(node => {
+            const isCompleted = folderIsCompleted(node.id);
+            const descendantTasks = getDescendants(node.id).filter(n => n.is_task);
+            const hasTasks = descendantTasks.length > 0;
+            
+            return (
+              <div key={node.id} className={`flex items-center gap-2 ${isCompleted ? 'opacity-50' : ''}`}>
+                {hasTasks && (
+                  <button 
+                    onClick={() => toggleFolder(node)}
+                    className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
+                      ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
+                  >
+                    {isCompleted && <span className="text-xs">✓</span>}
+                  </button>
+                )}
+                {!hasTasks && <div className="w-5 h-5 flex-shrink-0" />}
+                
+                <button
+                  onClick={() => navigate(node)}
+                  className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
+                >
+                  <span>📁</span>
+                  <span className={isCompleted ? 'line-through' : ''}>{node.name}</span>
+                  {hasTasks && (
+                    <span className="text-xs text-gray-500 ml-auto">
+                      {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
+                    </span>
+                  )}
+                </button>
+                
+                <button 
+                  onClick={() => setMovingNode(node)}
+                  className="p-3 text-gray-500 hover:text-blue-400 hover:bg-gray-800 rounded-lg"
+                  title="Mover"
+                >
+                  ↔️
+                </button>
+                <button 
+                  onClick={() => deleteNode(node.id)}
+                  className="p-3 text-gray-500 hover:text-red-400 hover:bg-gray-800 rounded-lg"
+                >
+                  🗑️
+                </button>
+              </div>
+            );
+          })}
+
+          {tasks.map(node => (
+            <div 
+              key={node.id}
+              className={`p-3 bg-gray-900 rounded-lg flex items-center gap-3 ${node.completed ? 'opacity-50' : ''}`}
+            >
+              <button 
+                onClick={() => toggleTask(node)}
+                className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center
+                  ${node.completed ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
+              >
+                {node.completed && <span className="text-xs">✓</span>}
+              </button>
+              <span className={node.completed ? 'line-through' : ''}>{node.name}</span>
+              <button 
+                onClick={() => deleteNode(node.id)}
+                className="ml-auto p-1 text-gray-500 hover:text-red-400"
+              >
+                🗑️
+              </button>
+            </div>
+          ))}
+
+          {currentNodes.length === 0 && !showShopping && (
+            <div className="text-center text-gray-500 py-8">
+              {showAll ? 'Vacío. Añade carpetas o tareas.' : 'No hay tareas pendientes.'}
+            </div>
+          )}
+        </div>
+
+        {/* Lista de compra - debajo de carpetas y tareas */}
         {showShopping && (
-          <div className="mb-6 p-4 bg-amber-950/30 border border-amber-700/50 rounded-xl">
+          <div className="mt-6 p-4 bg-amber-950/30 border border-amber-700/50 rounded-xl">
             <h3 className="text-amber-400 font-bold mb-3 flex items-center gap-2">
               🛒 Lista de la compra
               <span className="text-xs text-amber-600">
@@ -576,132 +702,6 @@ export default function App() {
             )}
           </div>
         )}
-
-        {/* Modal mover carpeta */}
-        {movingNode && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-            <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
-              <h3 className="text-lg font-bold mb-4">Mover "{movingNode.name}"</h3>
-              
-              <div className="space-y-2 mb-4">
-                <button
-                  onClick={() => setMoveTarget(null)}
-                  className={`w-full p-3 rounded-lg text-left ${
-                    moveTarget === null ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
-                  }`}
-                >
-                  📂 Raíz de {currentFunction.name}
-                </button>
-                
-                {availableTargets.map(target => (
-                  <button
-                    key={target.id}
-                    onClick={() => setMoveTarget(target.id)}
-                    className={`w-full p-3 rounded-lg text-left ${
-                      moveTarget === target.id ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
-                    }`}
-                  >
-                    📁 {target.name}
-                  </button>
-                ))}
-              </div>
-              
-              <div className="flex gap-2">
-                <button 
-                  onClick={moveNode}
-                  className="flex-1 p-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg"
-                >
-                  Mover aquí
-                </button>
-                <button 
-                  onClick={() => { setMovingNode(null); setMoveTarget(null); }}
-                  className="px-4 bg-gray-700 hover:bg-gray-600 rounded-lg"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Carpetas y tareas */}
-        <div className="space-y-3">
-          {folders.map(node => {
-            const isCompleted = folderIsCompleted(node.id);
-            const descendantTasks = getDescendants(node.id).filter(n => n.is_task);
-            const hasTasks = descendantTasks.length > 0;
-            
-            return (
-              <div key={node.id} className={`flex items-center gap-2 ${isCompleted ? 'opacity-50' : ''}`}>
-                {hasTasks && (
-                  <button 
-                    onClick={() => toggleFolder(node)}
-                    className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
-                      ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
-                  >
-                    {isCompleted && <span className="text-xs">✓</span>}
-                  </button>
-                )}
-                {!hasTasks && <div className="w-5 h-5 flex-shrink-0" />}
-                
-                <button
-                  onClick={() => navigate(node)}
-                  className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
-                >
-                  <span>📁</span>
-                  <span className={isCompleted ? 'line-through' : ''}>{node.name}</span>
-                  {hasTasks && (
-                    <span className="text-xs text-gray-500 ml-auto">
-                      {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
-                    </span>
-                  )}
-                </button>
-                
-                <button 
-                  onClick={() => setMovingNode(node)}
-                  className="p-3 text-gray-500 hover:text-blue-400 hover:bg-gray-800 rounded-lg"
-                  title="Mover"
-                >
-                  ↔️
-                </button>
-                <button 
-                  onClick={() => deleteNode(node.id)}
-                  className="p-3 text-gray-500 hover:text-red-400 hover:bg-gray-800 rounded-lg"
-                >
-                  🗑️
-                </button>
-              </div>
-            );
-          })}
-
-          {tasks.map(node => (
-            <div 
-              key={node.id}
-              className={`p-3 bg-gray-900 rounded-lg flex items-center gap-3 ${node.completed ? 'opacity-50' : ''}`}
-            >
-              <button 
-                onClick={() => toggleTask(node)}
-                className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center
-                  ${node.completed ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
-              >
-                {node.completed && <span className="text-xs">✓</span>}
-              </button>
-              <span className={node.completed ? 'line-through' : ''}>{node.name}</span>
-              <button 
-                onClick={() => deleteNode(node.id)}
-                className="ml-auto p-1 text-gray-500 hover:text-red-400"
-              >
-                🗑️
-              </button>
-            </div>
-          ))}
-
-          {currentNodes.length === 0 && (
-            <div className="text-center text-gray-500 py-8">
-              {showAll ? 'Vacío. Añade carpetas o tareas.' : 'No hay tareas pendientes.'}
-            </div>
-          )}
-        </div>
 
         {!addingType ? (
           <div className="flex gap-3 mt-6">
