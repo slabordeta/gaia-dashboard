@@ -11,7 +11,23 @@ export default function App() {
   const [addingType, setAddingType] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hadesActive, setHadesActive] = useState(false);
-  const [showAll, setShowAll] = useState(false); // false = solo pendientes, true = todo
+  const [showAll, setShowAll] = useState(false);
+  
+  // Mover carpetas
+  const [movingNode, setMovingNode] = useState(null);
+  const [moveTarget, setMoveTarget] = useState(null);
+  
+  // Lista de compra
+  const [shoppingItems, setShoppingItems] = useState([]);
+  const [showShopping, setShowShopping] = useState(false);
+  const [addingShopping, setAddingShopping] = useState(false);
+  const [newShoppingItem, setNewShoppingItem] = useState({
+    description: '',
+    units: 1,
+    unit_price: '',
+    store: '',
+    link: ''
+  });
 
   useEffect(() => {
     fetchStats();
@@ -22,6 +38,12 @@ export default function App() {
       fetchNodes(currentFunction.id);
     }
   }, [currentFunction]);
+
+  useEffect(() => {
+    if (currentFunction) {
+      fetchShoppingItems();
+    }
+  }, [currentFunction, currentPath]);
 
   const fetchStats = async () => {
     try {
@@ -45,7 +67,25 @@ export default function App() {
     }
   };
 
-  // Obtener todos los descendientes de un nodo
+  const fetchShoppingItems = async () => {
+    try {
+      const currentNodeId = currentPath.length > 0 ? currentPath[currentPath.length - 1].id : null;
+      let url;
+      
+      if (currentNodeId) {
+        url = `${API_URL}/shopping?node_id=${currentNodeId}&include_children=true`;
+      } else {
+        url = `${API_URL}/shopping?function_id=${currentFunction.id}`;
+      }
+      
+      const res = await fetch(url);
+      const data = await res.json();
+      setShoppingItems(data);
+    } catch (e) {
+      console.error('Error fetching shopping items:', e);
+    }
+  };
+
   const getDescendants = (nodeId) => {
     const children = nodes.filter(n => n.parent_id === nodeId);
     let descendants = [...children];
@@ -55,13 +95,11 @@ export default function App() {
     return descendants;
   };
 
-  // Verificar si una carpeta tiene tareas pendientes (recursivamente)
   const folderHasPendingTasks = (nodeId) => {
     const descendants = getDescendants(nodeId);
     return descendants.some(n => n.is_task && !n.completed);
   };
 
-  // Verificar si una carpeta está completamente completada
   const folderIsCompleted = (nodeId) => {
     const descendants = getDescendants(nodeId);
     const tasks = descendants.filter(n => n.is_task);
@@ -77,19 +115,27 @@ export default function App() {
       filtered = nodes.filter(n => n.parent_id === currentParentId);
     }
 
-    // Aplicar filtro de pendientes/todo
     if (!showAll) {
       filtered = filtered.filter(n => {
         if (n.is_task) {
           return !n.completed;
         } else {
-          // Mostrar carpeta si tiene tareas pendientes
           return folderHasPendingTasks(n.id);
         }
       });
     }
 
     return filtered;
+  };
+
+  // Obtener carpetas disponibles para mover (excluyendo el nodo actual y sus descendientes)
+  const getAvailableMoveTargets = () => {
+    if (!movingNode) return [];
+    
+    const descendantIds = getDescendants(movingNode.id).map(n => n.id);
+    const excluded = [movingNode.id, ...descendantIds];
+    
+    return nodes.filter(n => !n.is_task && !excluded.includes(n.id));
   };
 
   const navigate = (node) => {
@@ -108,6 +154,7 @@ export default function App() {
     setCurrentPath([]);
     setCurrentFunction(null);
     setAddingType(null);
+    setShowShopping(false);
     fetchStats();
   };
 
@@ -157,7 +204,6 @@ export default function App() {
     }
   };
 
-  // Completar/descompletar todas las tareas de una carpeta
   const toggleFolder = async (node) => {
     const descendants = getDescendants(node.id);
     const tasks = descendants.filter(n => n.is_task);
@@ -165,7 +211,6 @@ export default function App() {
     const newStatus = !isCurrentlyCompleted;
 
     try {
-      // Actualizar todas las tareas descendientes
       await Promise.all(tasks.map(task =>
         fetch(`${API_URL}/nodes`, {
           method: 'PUT',
@@ -192,6 +237,84 @@ export default function App() {
       console.error('Error deleting node:', e);
     }
   };
+
+  // Mover carpeta
+  const moveNode = async () => {
+    if (!movingNode) return;
+    
+    try {
+      await fetch(`${API_URL}/nodes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: movingNode.id,
+          parent_id: moveTarget // null = raíz
+        })
+      });
+      await fetchNodes(currentFunction.id);
+      setMovingNode(null);
+      setMoveTarget(null);
+    } catch (e) {
+      console.error('Error moving node:', e);
+    }
+  };
+
+  // Shopping functions
+  const addShoppingItem = async () => {
+    if (!newShoppingItem.description.trim()) return;
+    
+    const nodeId = currentPath.length > 0 ? currentPath[currentPath.length - 1].id : `root_${currentFunction.id}`;
+    
+    try {
+      await fetch(`${API_URL}/shopping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          node_id: nodeId,
+          function_id: currentFunction.id,
+          ...newShoppingItem,
+          unit_price: newShoppingItem.unit_price || null
+        })
+      });
+      
+      await fetchShoppingItems();
+      setNewShoppingItem({ description: '', units: 1, unit_price: '', store: '', link: '' });
+      setAddingShopping(false);
+    } catch (e) {
+      console.error('Error adding shopping item:', e);
+    }
+  };
+
+  const toggleShoppingItem = async (item) => {
+    try {
+      await fetch(`${API_URL}/shopping`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: item.id,
+          purchased: !item.purchased
+        })
+      });
+      await fetchShoppingItems();
+    } catch (e) {
+      console.error('Error toggling shopping item:', e);
+    }
+  };
+
+  const deleteShoppingItem = async (itemId) => {
+    try {
+      await fetch(`${API_URL}/shopping?id=${itemId}`, {
+        method: 'DELETE'
+      });
+      await fetchShoppingItems();
+    } catch (e) {
+      console.error('Error deleting shopping item:', e);
+    }
+  };
+
+  const shoppingTotal = shoppingItems
+    .filter(i => !i.purchased)
+    .reduce((acc, item) => acc + (parseFloat(item.unit_price) || 0) * (item.units || 1), 0);
 
   const totalPending = stats.reduce((acc, s) => acc + parseInt(s.pending_tasks || 0), 0);
 
@@ -260,6 +383,7 @@ export default function App() {
   const currentNodes = getCurrentNodes();
   const folders = currentNodes.filter(n => !n.is_task);
   const tasks = currentNodes.filter(n => n.is_task);
+  const availableTargets = getAvailableMoveTargets();
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6">
@@ -287,14 +411,12 @@ export default function App() {
           ))}
         </div>
 
-        {/* Filtro Pendiente/Todo */}
-        <div className="flex gap-2 mb-6">
+        {/* Filtros y toggle compra */}
+        <div className="flex gap-2 mb-6 flex-wrap">
           <button
             onClick={() => setShowAll(false)}
             className={`px-4 py-2 rounded-lg text-sm transition-all ${
-              !showAll 
-                ? 'bg-emerald-600 text-white' 
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              !showAll ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
             }`}
           >
             Pendiente
@@ -302,12 +424,18 @@ export default function App() {
           <button
             onClick={() => setShowAll(true)}
             className={`px-4 py-2 rounded-lg text-sm transition-all ${
-              showAll 
-                ? 'bg-emerald-600 text-white' 
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              showAll ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
             }`}
           >
             Todo
+          </button>
+          <button
+            onClick={() => setShowShopping(!showShopping)}
+            className={`px-4 py-2 rounded-lg text-sm transition-all ml-auto ${
+              showShopping ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            🛒 Compra {shoppingItems.filter(i => !i.purchased).length > 0 && `(${shoppingItems.filter(i => !i.purchased).length})`}
           </button>
         </div>
 
@@ -323,6 +451,180 @@ export default function App() {
           </div>
         )}
 
+        {/* Lista de compra */}
+        {showShopping && (
+          <div className="mb-6 p-4 bg-amber-950/30 border border-amber-700/50 rounded-xl">
+            <h3 className="text-amber-400 font-bold mb-3 flex items-center gap-2">
+              🛒 Lista de la compra
+              <span className="text-xs text-amber-600">
+                ({currentPath.length > 0 ? 'esta carpeta y subcarpetas' : 'toda la función'})
+              </span>
+            </h3>
+            
+            {shoppingItems.length > 0 ? (
+              <div className="space-y-2">
+                {shoppingItems.map(item => (
+                  <div 
+                    key={item.id}
+                    className={`p-3 bg-gray-900/50 rounded-lg ${item.purchased ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <button 
+                        onClick={() => toggleShoppingItem(item)}
+                        className={`w-5 h-5 mt-0.5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
+                          ${item.purchased ? 'bg-amber-500 border-amber-500' : 'border-amber-500 hover:bg-amber-500'}`}
+                      >
+                        {item.purchased && <span className="text-xs">✓</span>}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={item.purchased ? 'line-through text-gray-500' : ''}>{item.description}</span>
+                          {item.link && (
+                            <a href={item.link} target="_blank" rel="noopener noreferrer" 
+                               className="text-blue-400 hover:text-blue-300 text-xs">🔗</a>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
+                          <span>{item.units}x</span>
+                          {item.unit_price && <span>{parseFloat(item.unit_price).toFixed(2)}€/u</span>}
+                          {item.unit_price && <span className="text-amber-400">{(parseFloat(item.unit_price) * item.units).toFixed(2)}€</span>}
+                          {item.store && <span>📍 {item.store}</span>}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => deleteShoppingItem(item.id)}
+                        className="text-gray-500 hover:text-red-400 text-sm"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Total */}
+                {shoppingTotal > 0 && (
+                  <div className="pt-3 border-t border-amber-700/30 flex justify-between items-center">
+                    <span className="text-amber-400 font-bold">Total pendiente:</span>
+                    <span className="text-amber-400 font-bold text-lg">{shoppingTotal.toFixed(2)}€</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No hay artículos de compra aquí.</p>
+            )}
+
+            {/* Añadir artículo */}
+            {!addingShopping ? (
+              <button
+                onClick={() => setAddingShopping(true)}
+                className="mt-3 w-full p-2 border-2 border-dashed border-amber-700 hover:border-amber-500 rounded-lg text-amber-400 text-sm"
+              >
+                + Añadir artículo
+              </button>
+            ) : (
+              <div className="mt-3 p-3 bg-gray-900 rounded-lg space-y-2">
+                <input
+                  type="text"
+                  placeholder="Descripción *"
+                  value={newShoppingItem.description}
+                  onChange={(e) => setNewShoppingItem({...newShoppingItem, description: e.target.value})}
+                  className="w-full p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  autoFocus
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder="Unidades"
+                    value={newShoppingItem.units}
+                    onChange={(e) => setNewShoppingItem({...newShoppingItem, units: parseInt(e.target.value) || 1})}
+                    className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Precio/u (€)"
+                    value={newShoppingItem.unit_price}
+                    onChange={(e) => setNewShoppingItem({...newShoppingItem, unit_price: e.target.value})}
+                    className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Tienda"
+                    value={newShoppingItem.store}
+                    onChange={(e) => setNewShoppingItem({...newShoppingItem, store: e.target.value})}
+                    className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <input
+                    type="url"
+                    placeholder="Enlace (opcional)"
+                    value={newShoppingItem.link}
+                    onChange={(e) => setNewShoppingItem({...newShoppingItem, link: e.target.value})}
+                    className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={addShoppingItem} className="flex-1 p-2 bg-amber-600 hover:bg-amber-500 rounded text-sm">
+                    ✓ Añadir
+                  </button>
+                  <button onClick={() => setAddingShopping(false)} className="px-4 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Modal mover carpeta */}
+        {movingNode && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+            <div className="bg-gray-900 rounded-xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
+              <h3 className="text-lg font-bold mb-4">Mover "{movingNode.name}"</h3>
+              
+              <div className="space-y-2 mb-4">
+                <button
+                  onClick={() => setMoveTarget(null)}
+                  className={`w-full p-3 rounded-lg text-left ${
+                    moveTarget === null ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
+                  }`}
+                >
+                  📂 Raíz de {currentFunction.name}
+                </button>
+                
+                {availableTargets.map(target => (
+                  <button
+                    key={target.id}
+                    onClick={() => setMoveTarget(target.id)}
+                    className={`w-full p-3 rounded-lg text-left ${
+                      moveTarget === target.id ? 'bg-emerald-600' : 'bg-gray-800 hover:bg-gray-700'
+                    }`}
+                  >
+                    📁 {target.name}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex gap-2">
+                <button 
+                  onClick={moveNode}
+                  className="flex-1 p-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg"
+                >
+                  Mover aquí
+                </button>
+                <button 
+                  onClick={() => { setMovingNode(null); setMoveTarget(null); }}
+                  className="px-4 bg-gray-700 hover:bg-gray-600 rounded-lg"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Carpetas y tareas */}
         <div className="space-y-3">
           {folders.map(node => {
             const isCompleted = folderIsCompleted(node.id);
@@ -331,7 +633,6 @@ export default function App() {
             
             return (
               <div key={node.id} className={`flex items-center gap-2 ${isCompleted ? 'opacity-50' : ''}`}>
-                {/* Checkbox para carpeta */}
                 {hasTasks && (
                   <button 
                     onClick={() => toggleFolder(node)}
@@ -354,6 +655,14 @@ export default function App() {
                       {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
                     </span>
                   )}
+                </button>
+                
+                <button 
+                  onClick={() => setMovingNode(node)}
+                  className="p-3 text-gray-500 hover:text-blue-400 hover:bg-gray-800 rounded-lg"
+                  title="Mover"
+                >
+                  ↔️
                 </button>
                 <button 
                   onClick={() => deleteNode(node.id)}
