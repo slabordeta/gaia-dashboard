@@ -11,6 +11,7 @@ export default function App() {
   const [addingType, setAddingType] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hadesActive, setHadesActive] = useState(false);
+  const [showAll, setShowAll] = useState(false); // false = solo pendientes, true = todo
 
   useEffect(() => {
     fetchStats();
@@ -44,12 +45,51 @@ export default function App() {
     }
   };
 
+  // Obtener todos los descendientes de un nodo
+  const getDescendants = (nodeId) => {
+    const children = nodes.filter(n => n.parent_id === nodeId);
+    let descendants = [...children];
+    children.forEach(child => {
+      descendants = [...descendants, ...getDescendants(child.id)];
+    });
+    return descendants;
+  };
+
+  // Verificar si una carpeta tiene tareas pendientes (recursivamente)
+  const folderHasPendingTasks = (nodeId) => {
+    const descendants = getDescendants(nodeId);
+    return descendants.some(n => n.is_task && !n.completed);
+  };
+
+  // Verificar si una carpeta está completamente completada
+  const folderIsCompleted = (nodeId) => {
+    const descendants = getDescendants(nodeId);
+    const tasks = descendants.filter(n => n.is_task);
+    return tasks.length > 0 && tasks.every(n => n.completed);
+  };
+
   const getCurrentNodes = () => {
+    let filtered;
     if (currentPath.length === 0) {
-      return nodes.filter(n => !n.parent_id);
+      filtered = nodes.filter(n => !n.parent_id);
+    } else {
+      const currentParentId = currentPath[currentPath.length - 1].id;
+      filtered = nodes.filter(n => n.parent_id === currentParentId);
     }
-    const currentParentId = currentPath[currentPath.length - 1].id;
-    return nodes.filter(n => n.parent_id === currentParentId);
+
+    // Aplicar filtro de pendientes/todo
+    if (!showAll) {
+      filtered = filtered.filter(n => {
+        if (n.is_task) {
+          return !n.completed;
+        } else {
+          // Mostrar carpeta si tiene tareas pendientes
+          return folderHasPendingTasks(n.id);
+        }
+      });
+    }
+
+    return filtered;
   };
 
   const navigate = (node) => {
@@ -114,6 +154,31 @@ export default function App() {
       await fetchNodes(currentFunction.id);
     } catch (e) {
       console.error('Error toggling task:', e);
+    }
+  };
+
+  // Completar/descompletar todas las tareas de una carpeta
+  const toggleFolder = async (node) => {
+    const descendants = getDescendants(node.id);
+    const tasks = descendants.filter(n => n.is_task);
+    const isCurrentlyCompleted = folderIsCompleted(node.id);
+    const newStatus = !isCurrentlyCompleted;
+
+    try {
+      // Actualizar todas las tareas descendientes
+      await Promise.all(tasks.map(task =>
+        fetch(`${API_URL}/nodes`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: task.id,
+            completed: newStatus
+          })
+        })
+      ));
+      await fetchNodes(currentFunction.id);
+    } catch (e) {
+      console.error('Error toggling folder:', e);
     }
   };
 
@@ -199,7 +264,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-2 mb-6 text-sm flex-wrap">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
           <button onClick={goToRoot} className="hover:text-emerald-400">🌍 GAIA</button>
           <span className="text-gray-600">/</span>
           <button 
@@ -221,6 +287,30 @@ export default function App() {
           ))}
         </div>
 
+        {/* Filtro Pendiente/Todo */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setShowAll(false)}
+            className={`px-4 py-2 rounded-lg text-sm transition-all ${
+              !showAll 
+                ? 'bg-emerald-600 text-white' 
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            Pendiente
+          </button>
+          <button
+            onClick={() => setShowAll(true)}
+            className={`px-4 py-2 rounded-lg text-sm transition-all ${
+              showAll 
+                ? 'bg-emerald-600 text-white' 
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            Todo
+          </button>
+        </div>
+
         {currentPath.length === 0 && (
           <div className={`p-4 rounded-xl bg-gradient-to-r ${currentFunction.color} mb-6`}>
             <div className="flex items-center gap-3">
@@ -234,23 +324,46 @@ export default function App() {
         )}
 
         <div className="space-y-3">
-          {folders.map(node => (
-            <div key={node.id} className="flex items-center gap-2">
-              <button
-                onClick={() => navigate(node)}
-                className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
-              >
-                <span>📁</span>
-                <span>{node.name}</span>
-              </button>
-              <button 
-                onClick={() => deleteNode(node.id)}
-                className="p-3 text-gray-500 hover:text-red-400 hover:bg-gray-800 rounded-lg"
-              >
-                🗑️
-              </button>
-            </div>
-          ))}
+          {folders.map(node => {
+            const isCompleted = folderIsCompleted(node.id);
+            const descendantTasks = getDescendants(node.id).filter(n => n.is_task);
+            const hasTasks = descendantTasks.length > 0;
+            
+            return (
+              <div key={node.id} className={`flex items-center gap-2 ${isCompleted ? 'opacity-50' : ''}`}>
+                {/* Checkbox para carpeta */}
+                {hasTasks && (
+                  <button 
+                    onClick={() => toggleFolder(node)}
+                    className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
+                      ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
+                  >
+                    {isCompleted && <span className="text-xs">✓</span>}
+                  </button>
+                )}
+                {!hasTasks && <div className="w-5 h-5 flex-shrink-0" />}
+                
+                <button
+                  onClick={() => navigate(node)}
+                  className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
+                >
+                  <span>📁</span>
+                  <span className={isCompleted ? 'line-through' : ''}>{node.name}</span>
+                  {hasTasks && (
+                    <span className="text-xs text-gray-500 ml-auto">
+                      {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
+                    </span>
+                  )}
+                </button>
+                <button 
+                  onClick={() => deleteNode(node.id)}
+                  className="p-3 text-gray-500 hover:text-red-400 hover:bg-gray-800 rounded-lg"
+                >
+                  🗑️
+                </button>
+              </div>
+            );
+          })}
 
           {tasks.map(node => (
             <div 
@@ -276,7 +389,7 @@ export default function App() {
 
           {currentNodes.length === 0 && (
             <div className="text-center text-gray-500 py-8">
-              Vacío. Añade carpetas o tareas.
+              {showAll ? 'Vacío. Añade carpetas o tareas.' : 'No hay tareas pendientes.'}
             </div>
           )}
         </div>
