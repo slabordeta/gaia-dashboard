@@ -17,6 +17,12 @@ export default function App() {
   const [movingNode, setMovingNode] = useState(null);
   const [moveTarget, setMoveTarget] = useState(null);
   
+  // Edición
+  const [editingNode, setEditingNode] = useState(null);
+  const [editingNodeName, setEditingNodeName] = useState('');
+  const [editingShoppingItem, setEditingShoppingItem] = useState(null);
+  const [editingShoppingData, setEditingShoppingData] = useState({});
+
   // Lista de compra
   const [shoppingItems, setShoppingItems] = useState([]);
   const [showShopping, setShowShopping] = useState(false);
@@ -238,6 +244,32 @@ export default function App() {
     }
   };
 
+  // Editar nombre de nodo (carpeta o tarea)
+  const startEditingNode = (node) => {
+    setEditingNode(node.id);
+    setEditingNodeName(node.name);
+  };
+
+  const saveNodeName = async () => {
+    if (!editingNodeName.trim() || !editingNode) return;
+    
+    try {
+      await fetch(`${API_URL}/nodes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingNode,
+          name: editingNodeName.trim()
+        })
+      });
+      await fetchNodes(currentFunction.id);
+      setEditingNode(null);
+      setEditingNodeName('');
+    } catch (e) {
+      console.error('Error updating node name:', e);
+    }
+  };
+
   // Mover carpeta
   const moveNode = async () => {
     if (!movingNode) return;
@@ -309,6 +341,42 @@ export default function App() {
       await fetchShoppingItems();
     } catch (e) {
       console.error('Error deleting shopping item:', e);
+    }
+  };
+
+  // Editar artículo de compra
+  const startEditingShoppingItem = (item) => {
+    setEditingShoppingItem(item.id);
+    setEditingShoppingData({
+      description: item.description,
+      units: item.units,
+      unit_price: item.unit_price || '',
+      store: item.store || '',
+      link: item.link || ''
+    });
+  };
+
+  const saveShoppingItem = async () => {
+    if (!editingShoppingData.description?.trim() || !editingShoppingItem) return;
+    
+    try {
+      await fetch(`${API_URL}/shopping`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingShoppingItem,
+          description: editingShoppingData.description.trim(),
+          units: editingShoppingData.units || 1,
+          unit_price: editingShoppingData.unit_price || null,
+          store: editingShoppingData.store || null,
+          link: editingShoppingData.link || null
+        })
+      });
+      await fetchShoppingItems();
+      setEditingShoppingItem(null);
+      setEditingShoppingData({});
+    } catch (e) {
+      console.error('Error updating shopping item:', e);
     }
   };
 
@@ -504,6 +572,7 @@ export default function App() {
             const isCompleted = folderIsCompleted(node.id);
             const descendantTasks = getDescendants(node.id).filter(n => n.is_task);
             const hasTasks = descendantTasks.length > 0;
+            const isEditing = editingNode === node.id;
             
             return (
               <div key={node.id} className={`flex items-center gap-2 ${isCompleted ? 'opacity-50' : ''}`}>
@@ -518,18 +587,38 @@ export default function App() {
                 )}
                 {!hasTasks && <div className="w-5 h-5 flex-shrink-0" />}
                 
-                <button
-                  onClick={() => navigate(node)}
-                  className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
-                >
-                  <span>📁</span>
-                  <span className={isCompleted ? 'line-through' : ''}>{node.name}</span>
-                  {hasTasks && (
-                    <span className="text-xs text-gray-500 ml-auto">
-                      {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
-                    </span>
-                  )}
-                </button>
+                {isEditing ? (
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={editingNodeName}
+                      onChange={(e) => setEditingNodeName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveNodeName();
+                        if (e.key === 'Escape') { setEditingNode(null); setEditingNodeName(''); }
+                      }}
+                      className="flex-1 p-3 bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      autoFocus
+                    />
+                    <button onClick={saveNodeName} className="px-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg">✓</button>
+                    <button onClick={() => { setEditingNode(null); setEditingNodeName(''); }} className="px-3 bg-gray-700 hover:bg-gray-600 rounded-lg">✕</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => navigate(node)}
+                    onDoubleClick={() => startEditingNode(node)}
+                    className="flex-1 p-3 bg-gray-800 hover:bg-gray-700 rounded-lg text-left flex items-center gap-3"
+                    title="Doble click para editar"
+                  >
+                    <span>📁</span>
+                    <span className={isCompleted ? 'line-through' : ''}>{node.name}</span>
+                    {hasTasks && (
+                      <span className="text-xs text-gray-500 ml-auto">
+                        {descendantTasks.filter(t => !t.completed).length}/{descendantTasks.length}
+                      </span>
+                    )}
+                  </button>
+                )}
                 
                 <button 
                   onClick={() => setMovingNode(node)}
@@ -548,27 +637,57 @@ export default function App() {
             );
           })}
 
-          {tasks.map(node => (
-            <div 
-              key={node.id}
-              className={`p-3 bg-gray-900 rounded-lg flex items-center gap-3 ${node.completed ? 'opacity-50' : ''}`}
-            >
-              <button 
-                onClick={() => toggleTask(node)}
-                className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center
-                  ${node.completed ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
+          {tasks.map(node => {
+            const isEditing = editingNode === node.id;
+            
+            return (
+              <div 
+                key={node.id}
+                className={`p-3 bg-gray-900 rounded-lg flex items-center gap-3 ${node.completed ? 'opacity-50' : ''}`}
               >
-                {node.completed && <span className="text-xs">✓</span>}
-              </button>
-              <span className={node.completed ? 'line-through' : ''}>{node.name}</span>
-              <button 
-                onClick={() => deleteNode(node.id)}
-                className="ml-auto p-1 text-gray-500 hover:text-red-400"
-              >
-                🗑️
-              </button>
-            </div>
-          ))}
+                <button 
+                  onClick={() => toggleTask(node)}
+                  className={`w-5 h-5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
+                    ${node.completed ? 'bg-emerald-500 border-emerald-500' : 'border-emerald-500 hover:bg-emerald-500'}`}
+                >
+                  {node.completed && <span className="text-xs">✓</span>}
+                </button>
+                
+                {isEditing ? (
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={editingNodeName}
+                      onChange={(e) => setEditingNodeName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveNodeName();
+                        if (e.key === 'Escape') { setEditingNode(null); setEditingNodeName(''); }
+                      }}
+                      className="flex-1 p-2 bg-gray-800 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      autoFocus
+                    />
+                    <button onClick={saveNodeName} className="px-3 bg-emerald-600 hover:bg-emerald-500 rounded">✓</button>
+                    <button onClick={() => { setEditingNode(null); setEditingNodeName(''); }} className="px-3 bg-gray-700 hover:bg-gray-600 rounded">✕</button>
+                  </div>
+                ) : (
+                  <span 
+                    className={`flex-1 cursor-pointer ${node.completed ? 'line-through' : ''}`}
+                    onDoubleClick={() => startEditingNode(node)}
+                    title="Doble click para editar"
+                  >
+                    {node.name}
+                  </span>
+                )}
+                
+                <button 
+                  onClick={() => deleteNode(node.id)}
+                  className="p-1 text-gray-500 hover:text-red-400"
+                >
+                  🗑️
+                </button>
+              </div>
+            );
+          })}
 
           {currentNodes.length === 0 && !showShopping && (
             <div className="text-center text-gray-500 py-8">
@@ -589,43 +708,106 @@ export default function App() {
             
             {shoppingItems.length > 0 ? (
               <div className="space-y-2">
-                {shoppingItems.map(item => (
-                  <div 
-                    key={item.id}
-                    className={`p-3 bg-gray-900/50 rounded-lg ${item.purchased ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <button 
-                        onClick={() => toggleShoppingItem(item)}
-                        className={`w-5 h-5 mt-0.5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
-                          ${item.purchased ? 'bg-amber-500 border-amber-500' : 'border-amber-500 hover:bg-amber-500'}`}
-                      >
-                        {item.purchased && <span className="text-xs">✓</span>}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={item.purchased ? 'line-through text-gray-500' : ''}>{item.description}</span>
-                          {item.link && (
-                            <a href={item.link} target="_blank" rel="noopener noreferrer" 
-                               className="text-blue-400 hover:text-blue-300 text-xs">🔗</a>
-                          )}
+                {shoppingItems.map(item => {
+                  const isEditing = editingShoppingItem === item.id;
+                  
+                  return (
+                    <div 
+                      key={item.id}
+                      className={`p-3 bg-gray-900/50 rounded-lg ${item.purchased ? 'opacity-50' : ''}`}
+                    >
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Descripción *"
+                            value={editingShoppingData.description}
+                            onChange={(e) => setEditingShoppingData({...editingShoppingData, description: e.target.value})}
+                            className="w-full p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            autoFocus
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="number"
+                              placeholder="Unidades"
+                              value={editingShoppingData.units}
+                              onChange={(e) => setEditingShoppingData({...editingShoppingData, units: parseInt(e.target.value) || 1})}
+                              className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Precio/u (€)"
+                              value={editingShoppingData.unit_price}
+                              onChange={(e) => setEditingShoppingData({...editingShoppingData, unit_price: e.target.value})}
+                              className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              placeholder="Tienda"
+                              value={editingShoppingData.store}
+                              onChange={(e) => setEditingShoppingData({...editingShoppingData, store: e.target.value})}
+                              className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                            <input
+                              type="url"
+                              placeholder="Enlace (opcional)"
+                              value={editingShoppingData.link}
+                              onChange={(e) => setEditingShoppingData({...editingShoppingData, link: e.target.value})}
+                              className="p-2 bg-gray-800 rounded text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={saveShoppingItem} className="flex-1 p-2 bg-amber-600 hover:bg-amber-500 rounded text-sm">
+                              ✓ Guardar
+                            </button>
+                            <button onClick={() => { setEditingShoppingItem(null); setEditingShoppingData({}); }} className="px-4 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                              ✕
+                            </button>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
-                          <span>{item.units}x</span>
-                          {item.unit_price && <span>{parseFloat(item.unit_price).toFixed(2)}€/u</span>}
-                          {item.unit_price && <span className="text-amber-400">{(parseFloat(item.unit_price) * item.units).toFixed(2)}€</span>}
-                          {item.store && <span>📍 {item.store}</span>}
+                      ) : (
+                        <div className="flex items-start gap-3">
+                          <button 
+                            onClick={() => toggleShoppingItem(item)}
+                            className={`w-5 h-5 mt-0.5 rounded border-2 transition-colors flex items-center justify-center flex-shrink-0
+                              ${item.purchased ? 'bg-amber-500 border-amber-500' : 'border-amber-500 hover:bg-amber-500'}`}
+                          >
+                            {item.purchased && <span className="text-xs">✓</span>}
+                          </button>
+                          <div 
+                            className="flex-1 min-w-0 cursor-pointer"
+                            onDoubleClick={() => startEditingShoppingItem(item)}
+                            title="Doble click para editar"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={item.purchased ? 'line-through text-gray-500' : ''}>{item.description}</span>
+                              {item.link && (
+                                <a href={item.link} target="_blank" rel="noopener noreferrer" 
+                                   className="text-blue-400 hover:text-blue-300 text-xs"
+                                   onClick={(e) => e.stopPropagation()}>🔗</a>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
+                              <span>{item.units}x</span>
+                              {item.unit_price && <span>{parseFloat(item.unit_price).toFixed(2)}€/u</span>}
+                              {item.unit_price && <span className="text-amber-400">{(parseFloat(item.unit_price) * item.units).toFixed(2)}€</span>}
+                              {item.store && <span>📍 {item.store}</span>}
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => deleteShoppingItem(item.id)}
+                            className="text-gray-500 hover:text-red-400 text-sm"
+                          >
+                            🗑️
+                          </button>
                         </div>
-                      </div>
-                      <button 
-                        onClick={() => deleteShoppingItem(item.id)}
-                        className="text-gray-500 hover:text-red-400 text-sm"
-                      >
-                        🗑️
-                      </button>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 
                 {/* Total */}
                 {shoppingTotal > 0 && (
